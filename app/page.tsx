@@ -1,103 +1,146 @@
-import Image from "next/image";
+"use client"
 
-export default function Home() {
+import React, { useState } from 'react';
+import { useShape } from '@electric-sql/react';
+import { v4 as uuidv4 } from 'uuid';
+import { PrismaClient, Prisma } from '@prisma/client';
+
+interface User {
+  id: string;
+  username: string | null;
+  created_at: Date | string | null;
+  [key: string]: any;
+}
+
+function UserManagementComponent() {
+  const [newUsername, setNewUsername] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const prisma = new PrismaClient();
+
+  const ELECTRIC_URL = process.env.NEXT_PUBLIC_ELECTRIC_URL || 'http://localhost:5000';
+
+  const { isLoading, data: usersData } = useShape<User>({
+    url: `${ELECTRIC_URL}/v1/shape`,
+    params: {
+      table: `users`
+    },
+    parser: {
+      created_at: (value: string | null): Date | null => value ? new Date(value) : null,
+    },
+  });
+
+  const sortedUsers = usersData
+    ? [...usersData].sort((a, b) => a.username?.localeCompare(b.username ?? '') ?? 0)
+    : [];
+
+  async function handleAddUserDirectPrisma(event: React.FormEvent) {
+    event.preventDefault();
+    if (!newUsername.trim() || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    const userId = uuidv4();
+    const userData = {
+      id: userId,
+      username: newUsername.trim(),
+    };
+
+    try {
+      const newUser = await prisma.users.create({
+        data: {
+          id: userData.id,
+          username: userData.username,
+        },
+      });
+      console.log('Direct Prisma write successful. User *might* appear via Electric sync eventually.', newUser);
+      setNewUsername('');
+    } catch (error: any) {
+      console.error('Failed to add user via direct Prisma write:', error);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = (error.meta?.target as string[])?.join(', ') || 'field';
+        setSubmitError(`A user with this ${target} already exists.`);
+      } else {
+        setSubmitError(error.message || 'An unknown error occurred during Prisma write.');
+      }
+
+    } finally {
+       setIsSubmitting(false);
+    }
+  }
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="p-4 max-w-md mx-auto border rounded-lg shadow-md space-y-4 bg-white">
+      <h2 className="text-xl font-semibold text-center text-gray-800">User Management (Insecure Direct Prisma Write)</h2>
+      <p className="text-center text-red-600 font-bold border border-red-600 p-2 rounded">
+        ⚠️ WARNING: This component uses an insecure method of writing to the database directly from the browser. Do not use in production!
+      </p>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+      <form onSubmit={handleAddUserDirectPrisma} className="flex gap-2 items-start">
+        <div className="flex-grow space-y-1">
+            <input
+              type="text"
+              name="username"
+              placeholder="Enter new username"
+              value={newUsername}
+              onChange={(e) => {
+                  setNewUsername(e.target.value);
+                  if (submitError) setSubmitError(null);
+              }}
+              required
+              className={`w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none ${submitError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'} disabled:bg-gray-100 disabled:cursor-not-allowed`}
+              disabled={isSubmitting}
+              aria-invalid={!!submitError}
+              aria-describedby={submitError ? "username-error" : undefined}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            {submitError && (
+                <p id="username-error" className="text-red-600 text-xs px-1">
+                    {submitError}
+                </p>
+            )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="submit"
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled={isSubmitting || !newUsername.trim()}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          {isSubmitting ? 'Adding...' : 'Add User (Insecure)'}
+        </button>
+      </form>
+
+      <hr className="border-gray-200"/>
+
+      <div className="space-y-2">
+        <h4 className="text-lg font-medium text-gray-700">Existing Users:</h4>
+         {isLoading && !usersData && (
+            <div className="text-center py-4"><p className="text-gray-500 italic">Loading users...</p></div>
+        )}
+        {!isLoading && sortedUsers.length === 0 && (
+            <div className="bg-gray-50 p-3 rounded text-center"><p className="text-gray-500 italic">No users found.</p></div>
+        )}
+        {sortedUsers.length > 0 && (
+          <ul className="list-none bg-gray-50 p-3 rounded max-h-60 overflow-y-auto space-y-1 border border-gray-200">
+            {sortedUsers.map((user) => (
+              <li key={user.id} className="text-sm truncate py-1 px-2 flex items-center justify-between hover:bg-gray-100 rounded">
+                  <div>
+                      <span className="font-mono text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded mr-2" title={user.id}>
+                          {user.id.substring(0, 8)}
+                      </span>
+                      <span className="text-gray-800">
+                          {user.username || <span className="text-gray-400 italic">(No username)</span>}
+                      </span>
+                  </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
+
+export default UserManagementComponent;
